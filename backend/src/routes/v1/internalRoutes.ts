@@ -1,8 +1,9 @@
 import { Router } from 'express';
+import taskRoutes from './taskRoutes';
 
 const router = Router();
 
 // Internal authenticated routes will be added here
-// Example: router.use('/task', taskRoutes);
+router.use('/task', taskRoutes);
 
 export default router;
