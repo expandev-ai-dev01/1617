@@ -1,0 +1,94 @@
+import sql from 'mssql';
+import { config } from '@/config';
+
+export enum ExpectedReturn {
+  Single = 'single',
+  Multi = 'multi',
+  None = 'none',
+}
+
+export interface IRecordSet<T = any> {
+  recordset: T[];
+  rowsAffected: number[];
+}
+
+let pool: sql.ConnectionPool | null = null;
+
+export async function getPool(): Promise<sql.ConnectionPool> {
+  if (!pool) {
+    pool = await sql.connect({
+      server: config.database.server,
+      port: config.database.port,
+      user: config.database.user,
+      password: config.database.password,
+      database: config.database.database,
+      options: {
+        encrypt: config.database.options.encrypt,
+        trustServerCertificate: config.database.options.trustServerCertificate,
+      },
+    });
+  }
+  return pool;
+}
+
+export async function dbRequest(
+  routine: string,
+  parameters: { [key: string]: any },
+  expectedReturn: ExpectedReturn,
+  transaction?: sql.Transaction,
+  resultSetNames?: string[]
+): Promise<any> {
+  try {
+    const currentPool = transaction || (await getPool());
+    const request = currentPool.request();
+
+    for (const [key, value] of Object.entries(parameters)) {
+      request.input(key, value);
+    }
+
+    const result = await request.execute(routine);
+
+    if (expectedReturn === ExpectedReturn.None) {
+      return null;
+    }
+
+    if (expectedReturn === ExpectedReturn.Single) {
+      return result.recordset[0] || null;
+    }
+
+    if (expectedReturn === ExpectedReturn.Multi) {
+      if (resultSetNames && resultSetNames.length > 0) {
+        const namedResults: { [key: string]: any[] } = {};
+        resultSetNames.forEach((name, index) => {
+          namedResults[name] = result.recordsets[index] || [];
+        });
+        return namedResults;
+      }
+      return result.recordsets;
+    }
+
+    return result.recordset;
+  } catch (error: any) {
+    console.error('Database request error:', {
+      routine,
+      error: error.message,
+      number: error.number,
+    });
+    throw error;
+  }
+}
+
+export async function beginTransaction(): Promise<sql.Transaction> {
+  const currentPool = await getPool();
+  const transaction = new sql.Transaction(currentPool);
+  await transaction.begin();
+  return transaction;
+}
+
+export async function commitTransaction(transaction: sql.Transaction): Promise<void> {
+  await transaction.commit();
+}
+
+export async function rollbackTransaction(transaction: sql.Transaction): Promise<void> {
+  await transaction.rollback();
+}
